@@ -19,10 +19,18 @@
 (define-constant ERR_LOAN_NOT_FUNDED 1003)
 (define-constant ERR_LOAN_ALREADY_REPAID 1004)
 (define-constant ERR_NOT_ENOUGH_FUNDS 1005)
+(define-constant ERR_TRANSFER_FAILED 1006)
+(define-constant ERR_INVALID_AMOUNT 1007)
+(define-constant ERR_INVALID_DUE_DATE 1008)
 
 (define-public (request-loan (amount uint) (interest uint) (due-date uint))
     (begin
-        (asserts! (> amount u0) (err ERR_NOT_ENOUGH_FUNDS))
+        ;; Validate inputs
+        (asserts! (> amount u0) (err ERR_INVALID_AMOUNT))
+        (asserts! (> interest u0) (err ERR_INVALID_AMOUNT))
+        (asserts! (> due-date u0) (err ERR_INVALID_DUE_DATE))
+
+        ;; Insert the loan request into the loans map
         (map-insert loans
             { borrower: tx-sender }
             { amount: amount, interest: interest, due-date: due-date, lender: none, repaid: false })
@@ -32,33 +40,36 @@
 )
 
 (define-public (fund-loan (borrower principal))
-    (let ((loan (map-get? loans { borrower: borrower })))
-        (match loan
-            loan-data
-            (if (is-none (get lender loan-data))
-                (let ((amount (get amount loan-data)))
-                    (try! (stx-transfer? amount tx-sender borrower))
+    (let ((loan (unwrap! (map-get? loans { borrower: borrower }) (err ERR_LOAN_NOT_FUNDED))))
+        ;; Ensure the loan is not already funded
+        (asserts! (is-none (get lender loan)) (err ERR_LOAN_ALREADY_FUNDED))
+        (let ((amount (get amount loan)))
+            (match (stx-transfer? amount tx-sender borrower)
+                success (begin
+                    ;; Update the loan with lender details
                     (map-set loans { borrower: borrower } 
-                        (merge loan-data { lender: (some tx-sender) }))
+                        (merge loan { lender: (some tx-sender) }))
                     (var-set last-loan-funded (tuple (lender tx-sender) (borrower borrower) (amount amount)))
                     (ok true))
-                (err ERR_LOAN_ALREADY_FUNDED))
-            (err ERR_NOT_BORROWER))
+                error (err ERR_TRANSFER_FAILED))
+        )
     )
 )
 
 (define-public (repay-loan (lender principal))
-    (let ((loan (map-get? loans { borrower: tx-sender })))
-        (match loan
-            loan-data
-            (if (and (is-some (get lender loan-data)) (not (get repaid loan-data)))
-                (let ((amount (+ (get amount loan-data) (get interest loan-data))))
-                    (try! (stx-transfer? amount tx-sender lender))
+    (let ((loan (unwrap! (map-get? loans { borrower: tx-sender }) (err ERR_LOAN_NOT_FUNDED))))
+        ;; Ensure the loan is funded and not already repaid
+        (asserts! (and (is-some (get lender loan)) (not (get repaid loan))) (err ERR_LOAN_ALREADY_REPAID))
+        (let ((amount (+ (get amount loan) (get interest loan))))
+            (match (stx-transfer? amount tx-sender lender)
+                success (begin
+                    ;; Mark the loan as repaid
                     (map-set loans { borrower: tx-sender } 
-                        (merge loan-data { repaid: true }))
+                        (merge loan { repaid: true }))
                     (var-set last-loan-repaid (tuple (borrower tx-sender) (lender lender) (amount amount)))
                     (ok true))
-                (err ERR_LOAN_ALREADY_REPAID))
-            (err ERR_LOAN_NOT_FUNDED))
+                error (err ERR_TRANSFER_FAILED))
+        )
     )
 )
+
