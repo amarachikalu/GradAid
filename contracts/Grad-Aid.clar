@@ -2,7 +2,6 @@
     { borrower: principal }
     { amount: uint, interest: uint, due-date: uint, lender: (optional principal), repaid: bool })
 
-;; Event tracking using data vars
 (define-data-var last-loan-request 
     (tuple (borrower principal) (amount uint) (interest uint) (due-date uint))
     (tuple (borrower 'SP000000000000000000002Q6VF78) (amount u0) (interest u0) (due-date u0)))
@@ -21,7 +20,6 @@
 (define-constant ERR_LOAN_ALREADY_REPAID 1004)
 (define-constant ERR_NOT_ENOUGH_FUNDS 1005)
 
-;; Request a loan
 (define-public (request-loan (amount uint) (interest uint) (due-date uint))
     (begin
         (asserts! (> amount u0) (err ERR_NOT_ENOUGH_FUNDS))
@@ -33,12 +31,11 @@
     )
 )
 
-;; Fund a loan
 (define-public (fund-loan (borrower principal))
     (let ((loan (map-get? loans { borrower: borrower })))
         (match loan
             loan-data
-            (if (is-none? (get lender loan-data))
+            (if (is-none (get lender loan-data))
                 (let ((amount (get amount loan-data)))
                     (try! (stx-transfer? amount tx-sender borrower))
                     (map-set loans { borrower: borrower } 
@@ -50,7 +47,6 @@
     )
 )
 
-;; Repay a loan
 (define-public (repay-loan (lender principal))
     (let ((loan (map-get? loans { borrower: tx-sender })))
         (match loan
